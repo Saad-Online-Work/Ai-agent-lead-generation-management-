@@ -1,0 +1,38 @@
+{
+  "name": "14_Business_Finder",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "find-business", "responseMode": "lastNode"},
+      "id": "webhook-find", "name": "Business Finder Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 1.1, "position": [250, 300], "webhookId": "biz-014"
+    },
+    {
+      "parameters": {"jsCode": "const cities = ['New York','Los Angeles','Chicago','Houston','Phoenix','Philadelphia','Dallas','Miami','Atlanta','Seattle','Denver','Boston','Austin','Portland','Nashville'];\nconst queries = ['architecture firm','architectural design','residential architect','commercial architect','landscape architect','interior architect'];\nconst tasks = [];\nfor (const city of cities) { for (const q of queries) { tasks.push({city, query: q, location: city + ', USA'}); } }\nreturn tasks.slice(0, 5);"},
+      "id": "gen-tasks", "name": "Generate Search Tasks", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [450, 300]
+    },
+    {
+      "parameters": {"url": "https://api.linkedin.com/v2/search", "method": "GET", "sendHeaders": true, "headerParameters": {"parameters": [{"name": "Authorization", "value": "Bearer {{$env.LINKEDIN_ACCESS_TOKEN}}"}]}, "sendQuery": true, "queryParameters": {"parameters": [{"name": "q", "value": "companySearch"}, {"name": "keywords", "value": "={{$json.query}}"}, {"name": "location", "value": "={{$json.location}}"}]}, "options": {"timeout": 15000}, "continueOnFail": true},
+      "id": "linkedin-api", "name": "LinkedIn Search", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [650, 200]
+    },
+    {
+      "parameters": {"url": "https://api.apollo.io/v1/mixed_people/search", "method": "POST", "sendHeaders": true, "headerParameters": {"parameters": [{"name": "Content-Type", "value": "application/json"}, {"name": "X-Api-Key", "value": "={{$env.APOLLO_API_KEY}}"}]}, "sendBody": true, "bodyParameters": {"parameters": [{"name": "q_organization_domains", "value": "={{$json.query}}"}, {"name": "page", "value": "1"}]}, "options": {"timeout": 15000}, "continueOnFail": true},
+      "id": "apollo-api", "name": "Apollo.io Search", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [650, 400]
+    },
+    {
+      "parameters": {"jsCode": "const all = $input.all();\nconst linkedin = all.find(i => i.json.elements)?.json?.elements || [];\nconst apollo = all.find(i => i.json.people)?.json?.people || [];\nconst businesses = [];\nfor (const c of linkedin) { businesses.push({businessName: c.name, website: c.websiteUrl, industry: c.industry, source: 'LinkedIn', id: 'li-'+c.id}); }\nfor (const p of apollo) { businesses.push({businessName: p.organization_name, website: p.organization_website, email: p.email, phone: p.phone, source: 'Apollo', id: 'ap-'+p.id}); }\nreturn businesses;"},
+      "id": "parse-results", "name": "Parse Business Results", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [850, 300]
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads.csv", "options": {"delimiter": ",", "headerRow": true, "append": true}},
+      "id": "save-businesses", "name": "Save to leads.csv", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [1050, 300]
+    }
+  ],
+  "connections": {
+    "Business Finder Webhook": {"main": [[{"node": "Generate Search Tasks", "type": "main", "index": 0}]]},
+    "Generate Search Tasks": {"main": [[{"node": "LinkedIn Search", "type": "main", "index": 0}, {"node": "Apollo.io Search", "type": "main", "index": 0}]]},
+    "LinkedIn Search": {"main": [[{"node": "Parse Business Results", "type": "main", "index": 0}]]},
+    "Apollo.io Search": {"main": [[{"node": "Parse Business Results", "type": "main", "index": 0}]]},
+    "Parse Business Results": {"main": [[{"node": "Save to leads.csv", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null, "tags": [{"name": "business"}], "pinData": {}, "versionId": "1.0.0"
+}

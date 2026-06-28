@@ -1,0 +1,39 @@
+{
+  "name": "09_SMTP_Sender",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "send-emails", "responseMode": "lastNode"},
+      "id": "webhook-send", "name": "Send Email Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 1.1, "position": [250, 300], "webhookId": "send-009"
+    },
+    {
+      "parameters": {"operation": "read", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/generated_emails.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "read-emails", "name": "Read Generated Emails", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [450, 300]
+    },
+    {
+      "parameters": {"jsCode": "const emails = $input.first().json.data || [];\nconst unsent = emails.filter(e => !e.sentAt || e.sentAt === '').slice(0, 5);\nreturn {emails: unsent, count: unsent.length};"},
+      "id": "filter-unsent", "name": "Filter Unsent Emails", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [650, 300]
+    },
+    {
+      "parameters": {"jsCode": "const email = $input.first().json;\nreturn {from: '{{$env.SMTP_USER}}', to: email.email, subject: email.subject, text: email.body, leadId: email.leadId};"},
+      "id": "format-for-smtp", "name": "Format for SMTP", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [850, 300]
+    },
+    {
+      "parameters": {"fromEmail": "={{$json.from}}", "toEmail": "={{$json.to}}", "subject": "={{$json.subject}}", "text": "={{$json.text}}", "options": {}},
+      "id": "send-email", "name": "Send Email via SMTP", "type": "n8n-nodes-base.emailSend", "typeVersion": 2, "position": [1050, 300],
+      "credentials": {"smtp": {"id": "1", "name": "SMTP Account"}}
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/sent_log.csv", "options": {"delimiter": ",", "headerRow": true, "append": true}},
+      "id": "log-sent", "name": "Log Sent Email", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [1250, 300]
+    }
+  ],
+  "connections": {
+    "Send Email Webhook": {"main": [[{"node": "Read Generated Emails", "type": "main", "index": 0}]]},
+    "Read Generated Emails": {"main": [[{"node": "Filter Unsent Emails", "type": "main", "index": 0}]]},
+    "Filter Unsent Emails": {"main": [[{"node": "Format for SMTP", "type": "main", "index": 0}]]},
+    "Format for SMTP": {"main": [[{"node": "Send Email via SMTP", "type": "main", "index": 0}]]},
+    "Send Email via SMTP": {"main": [[{"node": "Log Sent Email", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null, "tags": [{"name": "smtp"}, {"name": "send"}], "pinData": {}, "versionId": "1.0.0"
+}

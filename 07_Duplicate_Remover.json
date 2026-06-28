@@ -1,0 +1,32 @@
+{
+  "name": "07_Duplicate_Remover",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "remove-duplicates", "responseMode": "lastNode"},
+      "id": "webhook-dedup", "name": "Dedup Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 1.1, "position": [250, 300], "webhookId": "dedup-007"
+    },
+    {
+      "parameters": {"operation": "read", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "read-leads", "name": "Read All Leads", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [450, 300]
+    },
+    {
+      "parameters": {"jsCode": "const leads = $input.first().json.data || [];\nconst unique = new Map();\nconst duplicates = [];\n\nfor (const lead of leads) {\n  const key1 = (lead.website || '').toLowerCase().trim().replace(/^https?:\\/\\//, '').replace(/\\/$/, '');\n  const key2 = (lead.email || '').toLowerCase().trim();\n  const key3 = (lead.phone || '').replace(/[^0-9]/g, '');\n  \n  let matchKey = null;\n  if (key1 && unique.has('web:' + key1)) matchKey = 'web:' + key1;\n  else if (key2 && unique.has('email:' + key2)) matchKey = 'email:' + key2;\n  else if (key3 && key3.length > 7 && unique.has('phone:' + key3)) matchKey = 'phone:' + key3;\n  \n  if (matchKey) {\n    duplicates.push({...lead, duplicateOf: unique.get(matchKey), matchType: matchKey.split(':')[0]});\n  } else {\n    if (key1) unique.set('web:' + key1, lead.id);\n    if (key2) unique.set('email:' + key2, lead.id);\n    if (key3 && key3.length > 7) unique.set('phone:' + key3, lead.id);\n  }\n}\n\nconst cleanLeads = leads.filter(l => !duplicates.find(d => d.id === l.id));\nreturn {cleanLeads, duplicates, totalLeads: leads.length, cleanCount: cleanLeads.length, dupCount: duplicates.length};"},
+      "id": "find-duplicates", "name": "Find & Remove Duplicates", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [650, 300]
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads_clean.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "save-clean", "name": "Save Clean Leads", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [850, 200]
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/duplicates.csv", "options": {"delimiter": ",", "headerRow": true, "append": true}},
+      "id": "save-dupes", "name": "Save Duplicates Log", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [850, 400]
+    }
+  ],
+  "connections": {
+    "Dedup Webhook": {"main": [[{"node": "Read All Leads", "type": "main", "index": 0}]]},
+    "Read All Leads": {"main": [[{"node": "Find & Remove Duplicates", "type": "main", "index": 0}]]},
+    "Find & Remove Duplicates": {"main": [[{"node": "Save Clean Leads", "type": "main", "index": 0}, {"node": "Save Duplicates Log", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null, "tags": [{"name": "dedup"}], "pinData": {}, "versionId": "1.0.0"
+}

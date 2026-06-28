@@ -1,0 +1,32 @@
+{
+  "name": "18_AI_Decision_Engine",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "decide", "responseMode": "lastNode"},
+      "id": "webhook-decide", "name": "Decision Engine Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 1.1, "position": [250, 300], "webhookId": "decide-018"
+    },
+    {
+      "parameters": {"operation": "read", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "read-leads", "name": "Read All Leads", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [450, 300]
+    },
+    {
+      "parameters": {"jsCode": "const leads = $input.first().json.data || [];\nconst scored = leads.map(l => {\n  const ws = parseInt(l.websiteScore) || 0;\n  const ss = parseInt(l.socialScore) || 0;\n  const ev = l.emailValid === 'valid' ? 20 : 0;\n  const finalScore = Math.round((ws * 0.4) + (ss * 0.3) + (ev * 0.3));\n  let segment = 'COLD';\n  let action = 'nurture';\n  if (finalScore >= 80) { segment = 'HOT'; action = 'send_now'; }\n  else if (finalScore >= 60) { segment = 'WARM'; action = 'batch_send'; }\n  else if (finalScore >= 40) { segment = 'COLD'; action = 'nurture'; }\n  else { segment = 'DEAD'; action = 'archive'; }\n  return {...l, finalScore, segment, action, decidedAt: new Date().toISOString()};\n});\nreturn {leads: scored, hot: scored.filter(l => l.segment === 'HOT').length, warm: scored.filter(l => l.segment === 'WARM').length, cold: scored.filter(l => l.segment === 'COLD').length, dead: scored.filter(l => l.segment === 'DEAD').length};"},
+      "id": "score-segment", "name": "Score & Segment Leads", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [650, 300]
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/lead_segments.csv", "options": {"delimiter": ",", "headerRow": true, "append": false}},
+      "id": "save-segments", "name": "Save Lead Segments", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [850, 200]
+    },
+    {
+      "parameters": {"jsCode": "const results = $input.first().json;\nreturn {decisionComplete: true, hot: results.hot, warm: results.warm, cold: results.cold, dead: results.dead, nextAction: results.hot > 0 ? 'send_emails' : 'wait', timestamp: new Date().toISOString()};"},
+      "id": "decision-summary", "name": "Decision Summary", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [850, 400]
+    }
+  ],
+  "connections": {
+    "Decision Engine Webhook": {"main": [[{"node": "Read All Leads", "type": "main", "index": 0}]]},
+    "Read All Leads": {"main": [[{"node": "Score & Segment Leads", "type": "main", "index": 0}]]},
+    "Score & Segment Leads": {"main": [[{"node": "Save Lead Segments", "type": "main", "index": 0}, {"node": "Decision Summary", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null, "tags": [{"name": "ai"}, {"name": "decision"}], "pinData": {}, "versionId": "1.0.0"
+}

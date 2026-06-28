@@ -1,0 +1,43 @@
+{
+  "name": "16_AI_Business_Auditor",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "audit-business", "responseMode": "lastNode"},
+      "id": "webhook-audit-biz", "name": "Business Audit Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 1.1, "position": [250, 300], "webhookId": "audit-biz-016"
+    },
+    {
+      "parameters": {"operation": "read", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "read-leads", "name": "Read leads.csv", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [450, 300]
+    },
+    {
+      "parameters": {"jsCode": "const leads = ($input.first().json.data || []).filter(l => l.websiteScore && parseInt(l.websiteScore) > 0 && l.leadScore === '0').slice(0, 3).map(l => ({leadId: l.id, businessName: l.businessName, website: l.website, websiteScore: parseInt(l.websiteScore)||0, city: l.city, state: l.state, email: l.email, phone: l.phone}));\nreturn {leads, count: leads.length};"},
+      "id": "filter-unaudited", "name": "Filter Unaudited Businesses", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [650, 300]
+    },
+    {
+      "parameters": {"jsCode": "const lead = $input.first().json;\nconst prompt = `Analyze this architecture firm for digital readiness:\\nBusiness: ${lead.businessName}\\nWebsite Score: ${lead.websiteScore}/100\\nLocation: ${lead.city}, ${lead.state}\\n\\nProvide:\\n1. Digital SWOT analysis\\n2. Market position assessment\\n3. Recommendation for landing page\\n4. Lead quality score (0-100)\\n\\nReturn JSON: {\\\"swot\\\":{\\\"strengths\\\":[],\\\"weaknesses\\\":[],\\\"opportunities\\\":[],\\\"threats\\\":[]},\\\"marketPosition\\\":\\\"\\\",\\\"recommendation\\\":\\\"\\\",\\\"leadQualityScore\\\":0}`;\nreturn {lead, prompt};"},
+      "id": "build-audit-prompt", "name": "Build Audit Prompt", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [850, 300]
+    },
+    {
+      "parameters": {"url": "https://api.openai.com/v1/chat/completions", "method": "POST", "sendHeaders": true, "headerParameters": {"parameters": [{"name": "Authorization", "value": "Bearer {{$env.OPENAI_API_KEY}}"}, {"name": "Content-Type", "value": "application/json"}]}, "sendBody": true, "bodyParameters": {"parameters": [{"name": "model", "value": "gpt-4"}, {"name": "messages", "value": "[{\\\"role\\\":\\\"system\\\",\\\"content\\\":\\\"You analyze businesses for digital marketing readiness. Return valid JSON.\\\"},{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"{{$json.prompt}}\\\"}]"}, {"name": "temperature", "value": "0.5"}, {"name": "max_tokens", "value": "800"}]}, "options": {"timeout": 30000}, "continueOnFail": true},
+      "id": "openai-audit", "name": "OpenAI Business Audit", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [1050, 300]
+    },
+    {
+      "parameters": {"jsCode": "const aiResp = $input.first().json;\nconst lead = $('Build Audit Prompt').first().json.lead;\nlet audit = {swot: {strengths: ['Architecture expertise'], weaknesses: ['Website needs improvement'], opportunities: ['More clients online'], threats: ['Competition']}, marketPosition: 'Small firm', recommendation: 'Invest in professional landing page', leadQualityScore: 50};\ntry {\n  const content = aiResp.choices?.[0]?.message?.content;\n  if (content) { const parsed = JSON.parse(content); if (parsed.swot) audit = parsed; }\n} catch(e) {}\nreturn {leadId: lead.leadId, businessName: lead.businessName, ...audit, auditedAt: new Date().toISOString()};"},
+      "id": "parse-audit", "name": "Parse Audit Result", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [1250, 300]
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/business_audits.csv", "options": {"delimiter": ",", "headerRow": true, "append": true}},
+      "id": "save-audit", "name": "Save Business Audit", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [1450, 300]
+    }
+  ],
+  "connections": {
+    "Business Audit Webhook": {"main": [[{"node": "Read leads.csv", "type": "main", "index": 0}]]},
+    "Read leads.csv": {"main": [[{"node": "Filter Unaudited Businesses", "type": "main", "index": 0}]]},
+    "Filter Unaudited Businesses": {"main": [[{"node": "Build Audit Prompt", "type": "main", "index": 0}]]},
+    "Build Audit Prompt": {"main": [[{"node": "OpenAI Business Audit", "type": "main", "index": 0}]]},
+    "OpenAI Business Audit": {"main": [[{"node": "Parse Audit Result", "type": "main", "index": 0}]]},
+    "Parse Audit Result": {"main": [[{"node": "Save Business Audit", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null, "tags": [{"name": "ai"}, {"name": "audit"}], "pinData": {}, "versionId": "1.0.0"
+}

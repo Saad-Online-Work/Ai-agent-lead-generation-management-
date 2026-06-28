@@ -1,0 +1,43 @@
+{
+  "name": "08_AI_Email_Writer",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "write-email", "responseMode": "lastNode"},
+      "id": "webhook-ai-email", "name": "AI Email Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 1.1, "position": [250, 300], "webhookId": "ai-email-008"
+    },
+    {
+      "parameters": {"operation": "read", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "read-leads", "name": "Read leads.csv", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [450, 300]
+    },
+    {
+      "parameters": {"jsCode": "const leads = $input.first().json.data || [];\nconst ready = leads.filter(l => l.email && l.emailValid === 'valid' && l.status === 'new').slice(0, 3).map(l => ({leadId: l.id, businessName: l.businessName, website: l.website, email: l.email, city: l.city, state: l.state, websiteScore: l.websiteScore || '50'}));\nreturn {leads: ready, count: ready.length};"},
+      "id": "filter-ready", "name": "Filter Ready for Outreach", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [650, 300]
+    },
+    {
+      "parameters": {"jsCode": "const lead = $input.first().json;\nconst score = parseInt(lead.websiteScore) || 50;\nlet tone = 'professional';\nlet category = 'optimization';\nif (score < 30) { tone = 'urgent'; category = 'redesign'; }\nelse if (score < 50) { tone = 'concerned'; category = 'improvement'; }\nelse if (score < 70) { tone = 'helpful'; category = 'optimization'; }\nelse { tone = 'complimentary'; category = 'minor'; }\n\nconst prompt = `Write a cold outreach email for an architecture firm with these details:\\nBusiness: ${lead.businessName}\\nWebsite: ${lead.website}\\nLocation: ${lead.city}, ${lead.state}\\nWebsite Score: ${score}/100\\nCategory: ${category}\\nTone: ${tone}\\n\\nInclude:\\n1. Personal mention of their firm\\n2. Specific observation about their website\\n3. Value proposition for landing page design\\n4. Soft CTA for a call\\n\\nReturn JSON: {\\\"subject\\\": \\\"...\\\", \\\"body\\\": \\\"...\\\"}`;\n\nreturn {lead, prompt, tone, category, score};"},
+      "id": "build-prompt", "name": "Build AI Prompt", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [850, 300]
+    },
+    {
+      "parameters": {"url": "https://api.openai.com/v1/chat/completions", "method": "POST", "sendHeaders": true, "headerParameters": {"parameters": [{"name": "Authorization", "value": "Bearer {{$env.OPENAI_API_KEY}}"}, {"name": "Content-Type", "value": "application/json"}]}, "sendBody": true, "bodyParameters": {"parameters": [{"name": "model", "value": "gpt-4"}, {"name": "messages", "value": "[{\\\"role\\\":\\\"system\\\",\\\"content\\\":\\\"You write professional cold emails for web design services. Always return valid JSON.\\\"},{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"{{$json.prompt}}\\\"}]"}, {"name": "temperature", "value": "0.7"}, {"name": "max_tokens", "value": "500"}]}, "options": {"timeout": 30000}, "continueOnFail": true},
+      "id": "openai-api", "name": "OpenAI Generate Email", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [1050, 300]
+    },
+    {
+      "parameters": {"jsCode": "const aiResp = $input.first().json;\nconst promptData = $('Build AI Prompt').first().json;\n\nlet emailContent = {subject: 'Improving ' + promptData.lead.businessName, body: 'Hi,\\n\\nI noticed your website and wanted to share how we help architecture firms get more clients with modern landing pages.\\n\\nWould you be open to a quick call?\\n\\nBest regards'};\n\ntry {\n  const content = aiResp.choices?.[0]?.message?.content;\n  if (content) {\n    const parsed = JSON.parse(content);\n    if (parsed.subject && parsed.body) emailContent = parsed;\n  }\n} catch(e) {}\n\nreturn {leadId: promptData.lead.leadId, businessName: promptData.lead.businessName, email: promptData.lead.email, subject: emailContent.subject, body: emailContent.body, tone: promptData.tone, category: promptData.category, generatedAt: new Date().toISOString()};"},
+      "id": "parse-response", "name": "Parse AI Response", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [1250, 300]
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/generated_emails.csv", "options": {"delimiter": ",", "headerRow": true, "append": true}},
+      "id": "save-emails", "name": "Save Generated Emails", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [1450, 300]
+    }
+  ],
+  "connections": {
+    "AI Email Webhook": {"main": [[{"node": "Read leads.csv", "type": "main", "index": 0}]]},
+    "Read leads.csv": {"main": [[{"node": "Filter Ready for Outreach", "type": "main", "index": 0}]]},
+    "Filter Ready for Outreach": {"main": [[{"node": "Build AI Prompt", "type": "main", "index": 0}]]},
+    "Build AI Prompt": {"main": [[{"node": "OpenAI Generate Email", "type": "main", "index": 0}]]},
+    "OpenAI Generate Email": {"main": [[{"node": "Parse AI Response", "type": "main", "index": 0}]]},
+    "Parse AI Response": {"main": [[{"node": "Save Generated Emails", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null, "tags": [{"name": "ai"}, {"name": "email"}], "pinData": {}, "versionId": "1.0.0"
+}

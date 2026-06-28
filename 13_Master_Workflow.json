@@ -1,0 +1,73 @@
+{
+  "name": "13_Master_Workflow",
+  "nodes": [
+    {
+      "parameters": {"rule": {"interval": [{"hours": 6}]}},
+      "id": "schedule-trigger", "name": "Schedule Every 6 Hours", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.1, "position": [250, 300]
+    },
+    {
+      "parameters": {"jsCode": "const steps = [\n  {order: 1, workflow: '01_Config', webhook: 'config-start-001', purpose: 'Load Configuration'},\n  {order: 2, workflow: '03_Web_Scraper', webhook: 'scrape-start-trigger', purpose: 'Collect New Leads'},\n  {order: 3, workflow: '04_Website_Analyzer', webhook: 'audit-start-trigger', purpose: 'Analyze Websites'},\n  {order: 4, workflow: '05_Email_Extractor', webhook: 'email-ext-005', purpose: 'Extract Emails'},\n  {order: 5, workflow: '06_Email_Validator', webhook: 'val-006', purpose: 'Validate Emails'},\n  {order: 6, workflow: '07_Duplicate_Remover', webhook: 'dedup-007', purpose: 'Remove Duplicates'},\n  {order: 7, workflow: '08_AI_Email_Writer', webhook: 'ai-email-008', purpose: 'Generate Emails'},\n  {order: 8, workflow: '09_SMTP_Sender', webhook: 'send-009', purpose: 'Send Emails'},\n  {order: 9, workflow: '10_Followup_Agent', webhook: 'followup-010', purpose: 'Process Follow-ups'},\n  {order: 10, workflow: '12_Report_Generator', webhook: 'report-012', purpose: 'Generate Reports'}\n];\nreturn {steps, totalSteps: steps.length, startedAt: new Date().toISOString()};"},
+      "id": "orchestrator", "name": "Master Orchestrator", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [450, 300]
+    },
+    {
+      "parameters": {"url": "http://localhost:5678/webhook/config-start-001", "method": "POST", "options": {"timeout": 30000}, "continueOnFail": true},
+      "id": "call-config", "name": "Execute Config", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [650, 200]
+    },
+    {
+      "parameters": {"url": "http://localhost:5678/webhook/scrape-start-trigger", "method": "POST", "options": {"timeout": 60000}, "continueOnFail": true},
+      "id": "call-scraper", "name": "Execute Scraper", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [650, 350]
+    },
+    {
+      "parameters": {"url": "http://localhost:5678/webhook/audit-start-trigger", "method": "POST", "options": {"timeout": 120000}, "continueOnFail": true},
+      "id": "call-audit", "name": "Execute Website Audit", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [650, 500]
+    },
+    {
+      "parameters": {"url": "http://localhost:5678/webhook/email-ext-005", "method": "POST", "options": {"timeout": 60000}, "continueOnFail": true},
+      "id": "call-email-extract", "name": "Execute Email Extract", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [850, 200]
+    },
+    {
+      "parameters": {"url": "http://localhost:5678/webhook/val-006", "method": "POST", "options": {"timeout": 60000}, "continueOnFail": true},
+      "id": "call-validate", "name": "Execute Email Validate", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [850, 350]
+    },
+    {
+      "parameters": {"url": "http://localhost:5678/webhook/dedup-007", "method": "POST", "options": {"timeout": 30000}, "continueOnFail": true},
+      "id": "call-dedup", "name": "Execute Dedup", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [850, 500]
+    },
+    {
+      "parameters": {"url": "http://localhost:5678/webhook/ai-email-008", "method": "POST", "options": {"timeout": 60000}, "continueOnFail": true},
+      "id": "call-ai-email", "name": "Execute AI Email Writer", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [1050, 200]
+    },
+    {
+      "parameters": {"url": "http://localhost:5678/webhook/send-009", "method": "POST", "options": {"timeout": 60000}, "continueOnFail": true},
+      "id": "call-send", "name": "Execute Email Send", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [1050, 350]
+    },
+    {
+      "parameters": {"url": "http://localhost:5678/webhook/followup-010", "method": "POST", "options": {"timeout": 30000}, "continueOnFail": true},
+      "id": "call-followup", "name": "Execute Follow-up", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [1050, 500]
+    },
+    {
+      "parameters": {"url": "http://localhost:5678/webhook/report-012", "method": "POST", "options": {"timeout": 30000}, "continueOnFail": true},
+      "id": "call-report", "name": "Execute Report Generator", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [1250, 300]
+    },
+    {
+      "parameters": {"jsCode": "const results = $input.all();\nconst summary = {completed: results.length, totalSteps: 10, timestamp: new Date().toISOString(), status: 'Master workflow completed'};\nreturn summary;"},
+      "id": "master-summary", "name": "Master Summary", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [1450, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Every 6 Hours": {"main": [[{"node": "Master Orchestrator", "type": "main", "index": 0}]]},
+    "Master Orchestrator": {"main": [[{"node": "Execute Config", "type": "main", "index": 0}]]},
+    "Execute Config": {"main": [[{"node": "Execute Scraper", "type": "main", "index": 0}]]},
+    "Execute Scraper": {"main": [[{"node": "Execute Website Audit", "type": "main", "index": 0}]]},
+    "Execute Website Audit": {"main": [[{"node": "Execute Email Extract", "type": "main", "index": 0}]]},
+    "Execute Email Extract": {"main": [[{"node": "Execute Email Validate", "type": "main", "index": 0}]]},
+    "Execute Email Validate": {"main": [[{"node": "Execute Dedup", "type": "main", "index": 0}]]},
+    "Execute Dedup": {"main": [[{"node": "Execute AI Email Writer", "type": "main", "index": 0}]]},
+    "Execute AI Email Writer": {"main": [[{"node": "Execute Email Send", "type": "main", "index": 0}]]},
+    "Execute Email Send": {"main": [[{"node": "Execute Follow-up", "type": "main", "index": 0}]]},
+    "Execute Follow-up": {"main": [[{"node": "Execute Report Generator", "type": "main", "index": 0}]]},
+    "Execute Report Generator": {"main": [[{"node": "Master Summary", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null, "tags": [{"name": "master"}], "pinData": {}, "versionId": "1.0.0"
+}

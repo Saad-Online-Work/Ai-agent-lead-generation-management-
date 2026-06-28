@@ -1,0 +1,47 @@
+{
+  "name": "12_Report_Generator",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "generate-report", "responseMode": "lastNode"},
+      "id": "webhook-report", "name": "Report Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 1.1, "position": [250, 300], "webhookId": "report-012"
+    },
+    {
+      "parameters": {"operation": "read", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "read-leads", "name": "Read leads.csv", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [450, 200]
+    },
+    {
+      "parameters": {"operation": "read", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/sent_log.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "read-sent", "name": "Read sent_log.csv", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [450, 400]
+    },
+    {
+      "parameters": {"operation": "read", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/followup.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "read-followup", "name": "Read followup.csv", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [450, 600]
+    },
+    {
+      "parameters": {"jsCode": "const leads = $input.all()[0]?.json?.data || [];\nconst sent = $input.all()[1]?.json?.data || [];\nconst followup = $input.all()[2]?.json?.data || [];\n\nconst now = new Date();\nconst today = new Date(now.getFullYear(), now.getMonth(), now.getDate());\nconst weekAgo = new Date(today - 7*24*60*60*1000);\nconst monthAgo = new Date(today - 30*24*60*60*1000);\n\nconst leadsToday = leads.filter(l => new Date(l.createdAt) >= today).length;\nconst leadsWeek = leads.filter(l => new Date(l.createdAt) >= weekAgo).length;\nconst leadsMonth = leads.filter(l => new Date(l.createdAt) >= monthAgo).length;\n\nconst sentToday = sent.filter(s => new Date(s.sentAt) >= today).length;\nconst sentWeek = sent.filter(s => new Date(s.sentAt) >= weekAgo).length;\n\nconst replied = leads.filter(l => l.status === 'replied' || l.status === 'interested').length;\nconst meetings = leads.filter(l => l.status === 'meeting' || l.status === 'booked').length;\nconst won = leads.filter(l => l.status === 'won' || l.status === 'converted').length;\nconst lost = leads.filter(l => l.status === 'lost' || l.status === 'not-interested').length;\n\nconst report = {\n  generatedAt: now.toISOString(),\n  period: {today: today.toISOString(), weekAgo: weekAgo.toISOString(), monthAgo: monthAgo.toISOString()},\n  leads: {total: leads.length, today: leadsToday, week: leadsWeek, month: leadsMonth},\n  outreach: {sentToday, sentWeek, totalSent: sent.length, followups: followup.length},\n  responses: {replied, meetings, won, lost},\n  conversionRate: leads.length > 0 ? Math.round((won / leads.length) * 100) : 0,\n  replyRate: sent.length > 0 ? Math.round((replied / sent.length) * 100) : 0\n};\nreturn report;"},
+      "id": "calculate-metrics", "name": "Calculate All Metrics", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [650, 400]
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/exports/daily_report.csv", "options": {"delimiter": ",", "headerRow": true, "append": false}},
+      "id": "save-daily", "name": "Save Daily Report", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [850, 200]
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/exports/weekly_report.csv", "options": {"delimiter": ",", "headerRow": true, "append": false}},
+      "id": "save-weekly", "name": "Save Weekly Report", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [850, 400]
+    },
+    {
+      "parameters": {"jsCode": "const report = $input.first().json;\nreturn {reportComplete: true, totalLeads: report.leads.total, conversionRate: report.conversionRate + '%', replyRate: report.replyRate + '%', meetings: report.responses.meetings, won: report.responses.won, timestamp: report.generatedAt};"},
+      "id": "report-summary", "name": "Report Summary", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [1050, 300]
+    }
+  ],
+  "connections": {
+    "Report Webhook": {"main": [[{"node": "Read leads.csv", "type": "main", "index": 0}]]},
+    "Read leads.csv": {"main": [[{"node": "Read sent_log.csv", "type": "main", "index": 0}]]},
+    "Read sent_log.csv": {"main": [[{"node": "Read followup.csv", "type": "main", "index": 0}]]},
+    "Read followup.csv": {"main": [[{"node": "Calculate All Metrics", "type": "main", "index": 0}]]},
+    "Calculate All Metrics": {"main": [[{"node": "Save Daily Report", "type": "main", "index": 0}, {"node": "Save Weekly Report", "type": "main", "index": 0}]]},
+    "Save Daily Report": {"main": [[{"node": "Report Summary", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null, "tags": [{"name": "report"}], "pinData": {}, "versionId": "1.0.0"
+}

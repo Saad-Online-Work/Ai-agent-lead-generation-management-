@@ -1,0 +1,37 @@
+{
+  "name": "11_Logger",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "log-event", "responseMode": "lastNode"},
+      "id": "webhook-log", "name": "Logger Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 1.1, "position": [250, 300], "webhookId": "log-011"
+    },
+    {
+      "parameters": {"jsCode": "const event = $input.first().json;\nconst logEntry = {\n  id: 'log-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6),\n  workflow: event.workflow || event.source || 'unknown',\n  node: event.node || 'unnamed',\n  level: event.level || event.errorLevel || 'INFO',\n  message: (event.message || event.error || event.summary || '').substring(0, 500),\n  leadId: event.leadId || '',\n  data: JSON.stringify(event.data || {}).substring(0, 1000),\n  timestamp: new Date().toISOString()\n};\nreturn logEntry;"},
+      "id": "format-log", "name": "Format Log Entry", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [450, 300]
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/logs/system.log", "options": {"delimiter": ",", "headerRow": true, "append": true}},
+      "id": "save-system-log", "name": "Save to System Log", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [650, 200]
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/error_log.csv", "options": {"delimiter": ",", "headerRow": true, "append": true}},
+      "id": "save-error-log", "name": "Save to Error Log CSV", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [650, 400]
+    },
+    {
+      "parameters": {"jsCode": "const log = $input.first().json;\nif (log.level === 'ERROR' || log.level === 'CRITICAL') {\n  return {alert: true, message: '⚠️ ' + log.level + ': ' + log.message, workflow: log.workflow, timestamp: log.timestamp};\n}\nreturn {alert: false};"},
+      "id": "check-critical", "name": "Check Critical Errors", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [850, 300]
+    },
+    {
+      "parameters": {"url": "={{$env.SLACK_WEBHOOK_URL}}", "method": "POST", "sendBody": true, "bodyParameters": {"parameters": [{"name": "text", "value": "={{$json.message}}"}]}, "options": {"timeout": 5000}, "continueOnFail": true},
+      "id": "slack-alert", "name": "Send Slack Alert", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [1050, 300]
+    }
+  ],
+  "connections": {
+    "Logger Webhook": {"main": [[{"node": "Format Log Entry", "type": "main", "index": 0}]]},
+    "Format Log Entry": {"main": [[{"node": "Save to System Log", "type": "main", "index": 0}, {"node": "Save to Error Log CSV", "type": "main", "index": 0}]]},
+    "Save to System Log": {"main": [[{"node": "Check Critical Errors", "type": "main", "index": 0}]]},
+    "Check Critical Errors": {"main": [[{"node": "Send Slack Alert", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null, "tags": [{"name": "logger"}], "pinData": {}, "versionId": "1.0.0"
+}

@@ -1,0 +1,99 @@
+{
+  "name": "02_CSV_Manager",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "csv-manager",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-csv",
+      "name": "CSV Manager Start",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "csv-002"
+    },
+    {
+      "parameters": {
+        "jsCode": "const home = process.env.HOME || '/home/ubuntu';\nreturn {\n  leads: home + '/AI-Lead-Agent/database/leads.csv',\n  sentLog: home + '/AI-Lead-Agent/database/sent_log.csv',\n  errorLog: home + '/AI-Lead-Agent/database/error_log.csv',\n  blacklist: home + '/AI-Lead-Agent/database/blacklist.csv',\n  followup: home + '/AI-Lead-Agent/database/followup.csv',\n  templates: home + '/AI-Lead-Agent/database/templates.csv'\n};"
+      },
+      "id": "set-paths",
+      "name": "Set CSV Paths",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "filePath": "={{$json.leads}}",
+        "options": {"delimiter": ",", "headerRow": true}
+      },
+      "id": "read-leads",
+      "name": "Read leads.csv",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 1,
+      "position": [650, 200]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "filePath": "={{$json.sentLog}}",
+        "options": {"delimiter": ",", "headerRow": true}
+      },
+      "id": "read-sent",
+      "name": "Read sent_log.csv",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 1,
+      "position": [650, 400]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "filePath": "={{$json.blacklist}}",
+        "options": {"delimiter": ",", "headerRow": true}
+      },
+      "id": "read-blacklist",
+      "name": "Read blacklist.csv",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 1,
+      "position": [650, 600]
+    },
+    {
+      "parameters": {
+        "jsCode": "const leads = $input.all()[0]?.json?.data || [];\nconst sent = $input.all()[1]?.json?.data || [];\nconst blacklist = $input.all()[2]?.json?.data || [];\n\nconst blackEmails = new Set(blacklist.map(b => (b.email||'').toLowerCase()).filter(Boolean));\nconst sentEmails = new Set(sent.map(s => (s.email||'').toLowerCase()).filter(Boolean));\n\nconst clean = leads.filter(l => {\n  const e = (l.email||'').toLowerCase();\n  if (e && blackEmails.has(e)) return false;\n  if (e && sentEmails.has(e)) return false;\n  return true;\n});\n\nreturn { total: leads.length, clean: clean.length, blacklisted: leads.length - clean.length, leads: clean };\n"
+      },
+      "id": "filter-clean",
+      "name": "Filter Clean Leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "filePath": "={{$('Set CSV Paths').first().json.leads}}",
+        "options": {"delimiter": ",", "headerRow": true}
+      },
+      "id": "save-clean",
+      "name": "Save Clean Leads",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 1,
+      "position": [1050, 400]
+    }
+  ],
+  "connections": {
+    "CSV Manager Start": {"main": [[{"node": "Set CSV Paths", "type": "main", "index": 0}]]},
+    "Set CSV Paths": {"main": [[{"node": "Read leads.csv", "type": "main", "index": 0}]]},
+    "Read leads.csv": {"main": [[{"node": "Read sent_log.csv", "type": "main", "index": 0}]]},
+    "Read sent_log.csv": {"main": [[{"node": "Read blacklist.csv", "type": "main", "index": 0}]]},
+    "Read blacklist.csv": {"main": [[{"node": "Filter Clean Leads", "type": "main", "index": 0}]]},
+    "Filter Clean Leads": {"main": [[{"node": "Save Clean Leads", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null,
+  "tags": [{"name": "csv"}],
+  "pinData": {},
+  "versionId": "1.0.0"
+}

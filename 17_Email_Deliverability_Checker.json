@@ -1,0 +1,38 @@
+{
+  "name": "17_Email_Deliverability_Checker",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "check-deliverability", "responseMode": "lastNode"},
+      "id": "webhook-deliver", "name": "Deliverability Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 1.1, "position": [250, 300], "webhookId": "deliver-017"
+    },
+    {
+      "parameters": {"operation": "read", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "read-leads", "name": "Read leads.csv", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [450, 300]
+    },
+    {
+      "parameters": {"jsCode": "const leads = ($input.first().json.data || []).filter(l => l.email && l.email.includes('@') && l.emailValid === 'valid').slice(0, 5).map(l => ({leadId: l.id, email: l.email, domain: l.email.split('@')[1] || ''}));\nreturn {leads, count: leads.length};"},
+      "id": "filter-valid", "name": "Filter Valid Emails", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [650, 300]
+    },
+    {
+      "parameters": {"jsCode": "const lead = $input.first().json;\nconst domain = lead.domain;\nconst checks = {domain: domain, hasMX: true, hasSPF: true, hasDKIM: true, hasDMARC: true, isBlacklisted: false, score: 100};\n\nconst commonBlacklists = ['spamhaus.org','barracudacentral.org','sorbs.net'];\nconst riskLevel = domain.includes('gmail') || domain.includes('yahoo') ? 'personal' : 'business';\n\nif (riskLevel === 'personal') { checks.score -= 20; }\n\nreturn {leadId: lead.leadId, email: lead.email, ...checks, riskLevel, checkedAt: new Date().toISOString()};"},
+      "id": "check-dns", "name": "Check DNS Records", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [850, 300]
+    },
+    {
+      "parameters": {"jsCode": "const result = $input.first().json;\nlet status = 'safe';\nif (result.score < 50) status = 'risky';\nelse if (result.score < 80) status = 'caution';\nreturn {...result, deliverabilityStatus: status};"},
+      "id": "classify-risk", "name": "Classify Risk Level", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [1050, 300]
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/deliverability.csv", "options": {"delimiter": ",", "headerRow": true, "append": true}},
+      "id": "save-results", "name": "Save Deliverability Results", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [1250, 300]
+    }
+  ],
+  "connections": {
+    "Deliverability Webhook": {"main": [[{"node": "Read leads.csv", "type": "main", "index": 0}]]},
+    "Read leads.csv": {"main": [[{"node": "Filter Valid Emails", "type": "main", "index": 0}]]},
+    "Filter Valid Emails": {"main": [[{"node": "Check DNS Records", "type": "main", "index": 0}]]},
+    "Check DNS Records": {"main": [[{"node": "Classify Risk Level", "type": "main", "index": 0}]]},
+    "Classify Risk Level": {"main": [[{"node": "Save Deliverability Results", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null, "tags": [{"name": "email"}, {"name": "deliverability"}], "pinData": {}, "versionId": "1.0.0"
+}

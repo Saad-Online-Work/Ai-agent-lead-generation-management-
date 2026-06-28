@@ -1,0 +1,39 @@
+{
+  "name": "19_Auto_Reply_Analyzer",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "analyze-reply", "responseMode": "lastNode"},
+      "id": "webhook-reply", "name": "Reply Analyzer Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 1.1, "position": [250, 300], "webhookId": "reply-019"
+    },
+    {
+      "parameters": {"jsCode": "const replies = $input.all().filter(i => i.json.from || i.json.subject).map(r => ({from: r.json.from || r.json.replyEmail, subject: r.json.subject || '', body: (r.json.body || r.json.text || '').toLowerCase(), receivedAt: new Date().toISOString()}));\nreturn {replies, count: replies.length};"},
+      "id": "parse-replies", "name": "Parse Incoming Replies", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [450, 300]
+    },
+    {
+      "parameters": {"jsCode": "const reply = $input.first().json;\nconst body = reply.body || '';\nconst subject = reply.subject || '';\n\nlet classification = 'UNKNOWN';\nlet action = null;\n\nconst interested = ['interested','yes','tell me more','sounds good','let\\'s talk','schedule','call','meeting','appointment'];\nconst pricing = ['pricing','cost','price','quote','estimate','how much','budget','rate'];\nconst moreInfo = ['more info','portfolio','examples','case study','previous work','details'];\nconst notInterested = ['not interested','no thanks','unsubscribe','remove','stop','don\\'t contact'];\n\nfor (const w of interested) { if (body.includes(w) || subject.includes(w)) { classification = 'INTERESTED'; action = 'send_calendly'; break; } }\nfor (const w of pricing) { if (body.includes(w)) { classification = 'WANTS_PRICING'; action = 'send_pricing'; break; } }\nfor (const w of moreInfo) { if (body.includes(w)) { classification = 'WANTS_MORE_INFO'; action = 'send_portfolio'; break; } }\nfor (const w of notInterested) { if (body.includes(w)) { classification = 'NOT_INTERESTED'; action = 'mark_lost'; break; } }\n\nreturn {...reply, classification, action, classifiedAt: new Date().toISOString()};"},
+      "id": "classify-reply", "name": "Classify Reply Intent", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [650, 300]
+    },
+    {
+      "parameters": {"jsCode": "const reply = $input.first().json;\nif (reply.action === 'send_calendly') {\n  return {to: reply.from, subject: 'Schedule a call with us', body: 'Great to hear from you! Book a time here: {{$env.CALENDLY_EVENT_URL}}', action: 'send_calendly'};\n} else if (reply.action === 'send_pricing') {\n  return {to: reply.from, subject: 'Pricing Information', body: 'Our landing pages start at $2,500. Would you like a custom quote?', action: 'send_pricing'};\n} else if (reply.action === 'mark_lost') {\n  return {to: reply.from, subject: 'Thank you', body: 'Thank you for your response. We wish you the best.', action: 'mark_lost'};\n}\nreturn {action: 'no_action'};"},
+      "id": "generate-response", "name": "Generate Auto Response", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [850, 300]
+    },
+    {
+      "parameters": {"fromEmail": "={{$env.SMTP_USER}}", "toEmail": "={{$json.to}}", "subject": "={{$json.subject}}", "text": "={{$json.body}}", "options": {}},
+      "id": "send-reply", "name": "Send Auto Reply", "type": "n8n-nodes-base.emailSend", "typeVersion": 2, "position": [1050, 300],
+      "credentials": {"smtp": {"id": "1", "name": "SMTP Account"}}
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/reply_log.csv", "options": {"delimiter": ",", "headerRow": true, "append": true}},
+      "id": "log-reply", "name": "Log Reply", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [1250, 300]
+    }
+  ],
+  "connections": {
+    "Reply Analyzer Webhook": {"main": [[{"node": "Parse Incoming Replies", "type": "main", "index": 0}]]},
+    "Parse Incoming Replies": {"main": [[{"node": "Classify Reply Intent", "type": "main", "index": 0}]]},
+    "Classify Reply Intent": {"main": [[{"node": "Generate Auto Response", "type": "main", "index": 0}]]},
+    "Generate Auto Response": {"main": [[{"node": "Send Auto Reply", "type": "main", "index": 0}]]},
+    "Send Auto Reply": {"main": [[{"node": "Log Reply", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null, "tags": [{"name": "reply"}, {"name": "auto"}], "pinData": {}, "versionId": "1.0.0"
+}

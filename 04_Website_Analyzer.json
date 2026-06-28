@@ -1,0 +1,149 @@
+{
+  "name": "04_Website_Analyzer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "audit-website",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-audit",
+      "name": "Audit Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "audit-004"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads.csv",
+        "options": {"delimiter": ",", "headerRow": true}
+      },
+      "id": "read-leads",
+      "name": "Read leads.csv",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const leads = $input.first().json.data || [];\n\nconst toAudit = leads\n  .filter(l => l.website && (l.website.startsWith('http://') || l.website.startsWith('https://')))\n  .filter(l => l.websiteScore === '0' || l.websiteScore === '' || !l.websiteScore)\n  .slice(0, 5)\n  .map(l => ({\n    leadId: l.id,\n    businessName: l.businessName,\n    website: l.website,\n    email: l.email,\n    phone: l.phone,\n    city: l.city || '',\n    state: l.state || ''\n  }));\n\nreturn { leads: toAudit, count: toAudit.length, timestamp: new Date().toISOString() };"
+      },
+      "id": "filter-unscored",
+      "name": "Filter Unscored Leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.website}}",
+        "method": "GET",
+        "options": {
+          "timeout": 20000,
+          "response": {"response": {"responseFormat": "string"}},
+          "redirect": {"redirect": {"followRedirects": true, "maxRedirects": 5}}
+        },
+        "continueOnFail": true
+      },
+      "id": "fetch-html",
+      "name": "Fetch Website HTML",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/pagespeedonline/v5/runPagespeed",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "url", "value": "={{$json.website}}"},
+            {"name": "key", "value": "={{$env.GOOGLE_PAGESPEED_API_KEY}}"},
+            {"name": "strategy", "value": "mobile"},
+            {"name": "category", "value": "performance"},
+            {"name": "category", "value": "accessibility"},
+            {"name": "category", "value": "best-practices"},
+            {"name": "category", "value": "seo"}
+          ]
+        },
+        "options": {"timeout": 30000},
+        "continueOnFail": true
+      },
+      "id": "pagespeed-test",
+      "name": "PageSpeed Test",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 450]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allInputs = $input.all();\n\nconst htmlResp = allInputs.find(i => i.json.body || i.json.data);\nconst psResp = allInputs.find(i => i.json.lighthouseResult);\n\nconst html = String(htmlResp?.json?.body || htmlResp?.json?.data || '');\nconst finalUrl = htmlResp?.json?.url || htmlResp?.json?.requestUrl || '';\nconst statusCode = htmlResp?.json?.statusCode || 0;\n\nconst analysis = {\n  url: finalUrl,\n  statusCode: statusCode,\n  isAccessible: statusCode >= 200 && statusCode < 400,\n  hasHttps: finalUrl.startsWith('https://'),\n  hasForm: /<form\\b[^>]*>/i.test(html),\n  hasPhoneLink: /tel:[\\d\\-+()\\s]{7,}/i.test(html),\n  hasEmailLink: /mailto:[\\w.+-]+@[\\w.-]+\\.[a-z]{2,}/i.test(html),\n  hasCTA: /(contact us|get.*quote|free consultation|schedule|book now|get started|request|inquire)/i.test(html),\n  hasViewport: /<meta[^>]*viewport[^>]*>/i.test(html),\n  hasResponsiveCSS: /@media|max-width:\\s*\\d|min-width:\\s*\\d|flexbox|grid/i.test(html),\n  hasAnalytics: /(google-analytics|gtag|ga\\('|analytics\\.js|googletagmanager|fbq\\()/i.test(html),\n  hasSchema: /(schema\\.org|application\\/ld\\+json|itemprop|itemscope|itemtype)/i.test(html),\n  hasSitemap: /sitemap\\.xml/i.test(html),\n  hasChatWidget: /(chat|intercom|drift|zendesk|tawk\\.to|livechat|messenger)/i.test(html),\n  title: ((html.match(/<title[^>]*>([^<]+)<\\/title>/i) || [])[1] || '').trim(),\n  metaDescription: ((html.match(/<meta[^>]*name=[\"']description[\"'][^>]*content=[\"']([^\"']+)[\"']/i) || [])[1] || '').trim(),\n  imageCount: (html.match(/<img[^>]*>/gi) || []).length,\n  linkCount: (html.match(/<a[^>]*>/gi) || []).length,\n  wordCount: html.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim().split(' ').length\n};\n\nlet psScores = { performance: 0, accessibility: 0, bestPractices: 0, seo: 0, fcp: 0, lcp: 0, tbt: 0, cls: 0, speedIndex: 0 };\n\nif (psResp?.json?.lighthouseResult) {\n  const lh = psResp.json.lighthouseResult;\n  const cats = lh.categories || {};\n  const audits = lh.audits || {};\n  \n  psScores = {\n    performance: Math.round((cats.performance?.score || 0) * 100),\n    accessibility: Math.round((cats.accessibility?.score || 0) * 100),\n    bestPractices: Math.round((cats['best-practices']?.score || 0) * 100),\n    seo: Math.round((cats.seo?.score || 0) * 100),\n    fcp: Math.round((audits['first-contentful-paint']?.numericValue || 0) / 1000 * 10) / 10,\n    lcp: Math.round((audits['largest-contentful-paint']?.numericValue || 0) / 1000 * 10) / 10,\n    tbt: Math.round(audits['total-blocking-time']?.numericValue || 0),\n    cls: Math.round((audits['cumulative-layout-shift']?.numericValue || 0) * 100) / 100,\n    speedIndex: Math.round((audits['speed-index']?.numericValue || 0) / 1000 * 10) / 10\n  };\n}\n\nconst overallScore = Math.round(\n  (analysis.hasHttps ? 15 : 0) +\n  (analysis.hasViewport ? 10 : 0) +\n  (analysis.hasResponsiveCSS ? 10 : 0) +\n  (psScores.performance * 0.25) +\n  (psScores.accessibility * 0.10) +\n  (psScores.bestPractices * 0.10) +\n  (psScores.seo * 0.05) +\n  (analysis.hasCTA ? 10 : 0) +\n  (analysis.hasForm ? 10 : 0) +\n  ((analysis.hasPhoneLink || analysis.hasEmailLink) ? 5 : 0) +\n  (analysis.hasAnalytics ? 5 : 0)\n);\n\nconst issues = [];\nif (!analysis.hasHttps) issues.push('No HTTPS encryption');\nif (!analysis.hasViewport) issues.push('Not mobile-friendly (no viewport meta)');\nif (psScores.performance < 50) issues.push('Slow performance (PageSpeed < 50)');\nif (!analysis.hasCTA) issues.push('Missing call-to-action');\nif (!analysis.hasForm) issues.push('No contact form found');\nif (!analysis.hasAnalytics) issues.push('No analytics tracking');\nif (!analysis.hasSchema) issues.push('No schema markup for SEO');\n\nconst priorityScore = Math.round((100 - overallScore) * 0.7 + (issues.length * 8));\n\nlet redesignReason = '';\nif (overallScore < 30) {\n  redesignReason = 'Critical: Complete website redesign needed. Missing essential conversion elements.';\n} else if (overallScore < 50) {\n  redesignReason = 'Major improvements needed: ' + issues.slice(0, 3).join(', ') + '.';\n} else if (overallScore < 70) {\n  redesignReason = 'Moderate issues: ' + issues.slice(0, 2).join(', ') + '.';\n} else {\n  redesignReason = 'Minor optimizations available for better conversion.';\n}\n\nreturn {\n  leadId: $('Filter Unscored Leads').first().json.leadId,\n  businessName: $('Filter Unscored Leads').first().json.businessName,\n  website: analysis.url,\n  overallScore: overallScore,\n  priorityScore: Math.min(priorityScore, 100),\n  pageSpeedScores: psScores,\n  analysis: analysis,\n  issues: issues,\n  issueCount: issues.length,\n  redesignReason: redesignReason,\n  isHighPriority: priorityScore >= 70,\n  auditedAt: new Date().toISOString()\n};"
+      },
+      "id": "calculate-score",
+      "name": "Calculate Website Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1050, 325]
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst headers = ['leadId','businessName','website','overallScore','priorityScore','performance','accessibility','bestPractices','seo','hasHttps','hasForm','hasCTA','hasViewport','issues','redesignReason','auditedAt'];\n\nconst row = {\n  leadId: audit.leadId,\n  businessName: (audit.businessName || '').replace(/,/g, ';'),\n  website: (audit.website || '').replace(/,/g, ';'),\n  overallScore: String(audit.overallScore),\n  priorityScore: String(audit.priorityScore),\n  performance: String(audit.pageSpeedScores?.performance || 0),\n  accessibility: String(audit.pageSpeedScores?.accessibility || 0),\n  bestPractices: String(audit.pageSpeedScores?.bestPractices || 0),\n  seo: String(audit.pageSpeedScores?.seo || 0),\n  hasHttps: String(audit.analysis?.hasHttps || false),\n  hasForm: String(audit.analysis?.hasForm || false),\n  hasCTA: String(audit.analysis?.hasCTA || false),\n  hasViewport: String(audit.analysis?.hasViewport || false),\n  issues: (audit.issues || []).join('; ').replace(/,/g, ';'),\n  redesignReason: (audit.redesignReason || '').replace(/,/g, ';'),\n  auditedAt: audit.auditedAt\n};\n\nreturn { headers, row, count: 1 };"
+      },
+      "id": "format-audit-csv",
+      "name": "Format for Audit CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nconst updateRow = {\n  id: audit.leadId,\n  websiteScore: String(audit.overallScore),\n  updatedAt: new Date().toISOString()\n};\n\nreturn { leadId: audit.leadId, websiteScore: audit.overallScore, updatedAt: updateRow.updatedAt };"
+      },
+      "id": "prepare-lead-update",
+      "name": "Prepare Lead Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/website_audits.csv",
+        "options": {"delimiter": ",", "headerRow": true, "append": true}
+      },
+      "id": "save-audit-results",
+      "name": "Save Audit Results CSV",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 1,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const audit = $input.first().json;\n\nreturn {\n  auditComplete: true,\n  leadId: audit.leadId,\n  businessName: audit.businessName,\n  overallScore: audit.overallScore,\n  priorityScore: audit.priorityScore,\n  isHighPriority: audit.isHighPriority,\n  issuesFound: audit.issueCount,\n  nextStep: 'email-extraction',\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "audit-summary",
+      "name": "Audit Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1650, 300]
+    }
+  ],
+  "connections": {
+    "Audit Webhook": {"main": [[{"node": "Read leads.csv", "type": "main", "index": 0}]]},
+    "Read leads.csv": {"main": [[{"node": "Filter Unscored Leads", "type": "main", "index": 0}]]},
+    "Filter Unscored Leads": {"main": [[{"node": "Fetch Website HTML", "type": "main", "index": 0}, {"node": "PageSpeed Test", "type": "main", "index": 0}]]},
+    "Fetch Website HTML": {"main": [[{"node": "Calculate Website Score", "type": "main", "index": 0}]]},
+    "PageSpeed Test": {"main": [[{"node": "Calculate Website Score", "type": "main", "index": 0}]]},
+    "Calculate Website Score": {"main": [[{"node": "Format for Audit CSV", "type": "main", "index": 0}, {"node": "Prepare Lead Update", "type": "main", "index": 0}]]},
+    "Format for Audit CSV": {"main": [[{"node": "Save Audit Results CSV", "type": "main", "index": 0}]]},
+    "Prepare Lead Update": {"main": [[{"node": "Audit Summary", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null,
+  "tags": [{"name": "audit"}, {"name": "website"}],
+  "pinData": {},
+  "versionId": "1.0.0"
+}

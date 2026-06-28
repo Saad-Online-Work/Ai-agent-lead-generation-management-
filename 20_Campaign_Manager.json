@@ -1,0 +1,42 @@
+{
+  "name": "20_Campaign_Manager",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "campaign-status", "responseMode": "lastNode"},
+      "id": "webhook-campaign", "name": "Campaign Manager Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 1.1, "position": [250, 300], "webhookId": "camp-020"
+    },
+    {
+      "parameters": {"operation": "read", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "read-leads", "name": "Read leads.csv", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [450, 200]
+    },
+    {
+      "parameters": {"operation": "read", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/sent_log.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "read-sent", "name": "Read sent_log.csv", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [450, 400]
+    },
+    {
+      "parameters": {"operation": "read", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/followup.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "read-followup", "name": "Read followup.csv", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [450, 600]
+    },
+    {
+      "parameters": {"jsCode": "const leads = $input.all()[0]?.json?.data || [];\nconst sent = $input.all()[1]?.json?.data || [];\nconst followup = $input.all()[2]?.json?.data || [];\n\nconst statuses = {NEW: 0, CONTACTED: 0, OPENED: 0, CLICKED: 0, REPLIED: 0, MEETING: 0, WON: 0, LOST: 0};\n\nfor (const l of leads) {\n  const s = (l.status || '').toUpperCase();\n  if (statuses.hasOwnProperty(s)) statuses[s]++;\n  else statuses.NEW++;\n}\n\nconst total = leads.length || 1;\nconst funnel = [\n  {stage: 'Leads', count: total, pct: 100},\n  {stage: 'Contacted', count: statuses.CONTACTED + sent.length, pct: Math.round((sent.length/total)*100)},\n  {stage: 'Replied', count: statuses.REPLIED, pct: Math.round((statuses.REPLIED/total)*100)},\n  {stage: 'Meeting', count: statuses.MEETING, pct: Math.round((statuses.MEETING/total)*100)},\n  {stage: 'Won', count: statuses.WON, pct: Math.round((statuses.WON/total)*100)}\n];\n\nreturn {campaign: {total, statuses, funnel, followups: followup.length, activeRate: Math.round(((sent.length + followup.length)/total)*100)}, generatedAt: new Date().toISOString()};"},
+      "id": "calculate-funnel", "name": "Calculate Campaign Funnel", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [650, 400]
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/exports/campaign_report.csv", "options": {"delimiter": ",", "headerRow": true, "append": false}},
+      "id": "save-campaign", "name": "Save Campaign Report", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [850, 200]
+    },
+    {
+      "parameters": {"jsCode": "const report = $input.first().json;\nreturn {campaignComplete: true, totalLeads: report.campaign.total, won: report.campaign.statuses.WON, conversionRate: report.campaign.funnel[4].pct + '%', activeRate: report.campaign.activeRate + '%', nextCheck: new Date(Date.now() + 6*60*60*1000).toISOString()};"},
+      "id": "campaign-summary", "name": "Campaign Summary", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [850, 400]
+    }
+  ],
+  "connections": {
+    "Campaign Manager Webhook": {"main": [[{"node": "Read leads.csv", "type": "main", "index": 0}]]},
+    "Read leads.csv": {"main": [[{"node": "Read sent_log.csv", "type": "main", "index": 0}]]},
+    "Read sent_log.csv": {"main": [[{"node": "Read followup.csv", "type": "main", "index": 0}]]},
+    "Read followup.csv": {"main": [[{"node": "Calculate Campaign Funnel", "type": "main", "index": 0}]]},
+    "Calculate Campaign Funnel": {"main": [[{"node": "Save Campaign Report", "type": "main", "index": 0}, {"node": "Campaign Summary", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null, "tags": [{"name": "campaign"}, {"name": "manager"}], "pinData": {}, "versionId": "1.0.0"
+}

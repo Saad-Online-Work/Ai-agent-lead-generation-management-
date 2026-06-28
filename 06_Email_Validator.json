@@ -1,0 +1,47 @@
+{
+  "name": "06_Email_Validator",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "validate-email", "responseMode": "lastNode"},
+      "id": "webhook-validate", "name": "Validate Email Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 1.1, "position": [250, 300], "webhookId": "val-006"
+    },
+    {
+      "parameters": {"operation": "read", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "read-leads", "name": "Read leads.csv", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [450, 300]
+    },
+    {
+      "parameters": {"jsCode": "const leads = $input.first().json.data || [];\nconst toValidate = leads.filter(l => l.email && l.email !== '' && l.email !== 'pending' && l.email.includes('@') && l.emailValid === 'pending').slice(0, 10).map(l => ({leadId: l.id, businessName: l.businessName, email: l.email, website: l.website}));\nreturn {leads: toValidate, count: toValidate.length};"},
+      "id": "filter-pending", "name": "Filter Pending Validation", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [650, 300]
+    },
+    {
+      "parameters": {"url": "https://api.neverbounce.com/v4/single/check", "method": "POST", "sendBody": true, "bodyParameters": {"parameters": [{"name": "key", "value": "={{$env.NEVERBOUNCE_API_KEY}}"}, {"name": "email", "value": "={{$json.email}}"}]}, "options": {"timeout": 15000}, "continueOnFail": true},
+      "id": "neverbounce-api", "name": "NeverBounce API", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [850, 200]
+    },
+    {
+      "parameters": {"jsCode": "const email = $('Filter Pending Validation').first().json.email;\nconst domain = email.split('@')[1] || '';\nconst basicChecks = {hasAtSign: email.includes('@'), hasDot: email.includes('.'), validLength: email.length > 5 && email.length < 254, noSpaces: !email.includes(' '), commonFormat: /^[^@]+@[^@]+\\.[^@]+$/.test(email), disposableDomains: ['mailinator.com','tempmail.com','guerrillamail.com','10minutemail.com','yopmail.com'], isDisposable: false};\nif (domain) { basicChecks.isDisposable = basicChecks.disposableDomains.includes(domain.toLowerCase()); }\nbasicChecks.basicValid = basicChecks.hasAtSign && basicChecks.hasDot && basicChecks.validLength && basicChecks.noSpaces && basicChecks.commonFormat && !basicChecks.isDisposable;\nreturn basicChecks;"},
+      "id": "basic-validation", "name": "Basic Syntax Check", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [850, 400]
+    },
+    {
+      "parameters": {"jsCode": "const allInputs = $input.all();\nconst neverbounceResult = allInputs.find(i => i.json.result)?.json || {};\nconst basicResult = allInputs.find(i => i.json.basicValid !== undefined)?.json || {};\nconst lead = $('Filter Pending Validation').first().json;\n\nlet finalResult = 'invalid';\nlet confidence = 0;\nlet reason = '';\n\nif (neverbounceResult.result === 'valid') { finalResult = 'valid'; confidence = 90; reason = 'NeverBounce verified'; }\nelse if (neverbounceResult.result === 'catchall') { finalResult = 'risky'; confidence = 50; reason = 'Catch-all domain'; }\nelse if (neverbounceResult.result === 'unknown') { finalResult = 'unknown'; confidence = 30; reason = 'Cannot verify'; }\nelse if (basicResult.basicValid) { finalResult = 'risky'; confidence = 40; reason = 'Basic checks passed only'; }\nelse { finalResult = 'invalid'; confidence = 10; reason = 'Failed all checks'; }\n\nreturn {leadId: lead.leadId, businessName: lead.businessName, email: lead.email, result: finalResult, confidence: confidence, reason: reason, validatedAt: new Date().toISOString()};"},
+      "id": "combine-results", "name": "Combine Validation Results", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [1050, 300]
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/email_validations.csv", "options": {"delimiter": ",", "headerRow": true, "append": true}},
+      "id": "save-results", "name": "Save Validation Results", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [1250, 200]
+    },
+    {
+      "parameters": {"jsCode": "const result = $input.first().json;\nconst validLeads = result.result === 'valid' ? [{leadId: result.leadId, email: result.email, status: 'valid'}] : [];\nconst invalidLeads = result.result === 'invalid' ? [{leadId: result.leadId, email: result.email, reason: result.reason}] : [];\nreturn {valid: validLeads, invalid: invalidLeads, total: 1, nextStep: 'dedup'};"},
+      "id": "route-results", "name": "Route Valid/Invalid", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [1250, 400]
+    }
+  ],
+  "connections": {
+    "Validate Email Webhook": {"main": [[{"node": "Read leads.csv", "type": "main", "index": 0}]]},
+    "Read leads.csv": {"main": [[{"node": "Filter Pending Validation", "type": "main", "index": 0}]]},
+    "Filter Pending Validation": {"main": [[{"node": "NeverBounce API", "type": "main", "index": 0}, {"node": "Basic Syntax Check", "type": "main", "index": 0}]]},
+    "NeverBounce API": {"main": [[{"node": "Combine Validation Results", "type": "main", "index": 0}]]},
+    "Basic Syntax Check": {"main": [[{"node": "Combine Validation Results", "type": "main", "index": 0}]]},
+    "Combine Validation Results": {"main": [[{"node": "Save Validation Results", "type": "main", "index": 0}, {"node": "Route Valid/Invalid", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null, "tags": [{"name": "email"}, {"name": "validation"}], "pinData": {}, "versionId": "1.0.0"
+}

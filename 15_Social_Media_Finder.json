@@ -1,0 +1,48 @@
+{
+  "name": "15_Social_Media_Finder",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "find-social", "responseMode": "lastNode"},
+      "id": "webhook-social", "name": "Social Media Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 1.1, "position": [250, 300], "webhookId": "social-015"
+    },
+    {
+      "parameters": {"operation": "read", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads.csv", "options": {"delimiter": ",", "headerRow": true}},
+      "id": "read-leads", "name": "Read leads.csv", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [450, 300]
+    },
+    {
+      "parameters": {"jsCode": "const leads = ($input.first().json.data || []).filter(l => l.socialScore === '0' || !l.socialScore).slice(0, 3);\nreturn leads.map(l => ({leadId: l.id, businessName: l.businessName, website: l.website, domain: (l.website||'').replace(/^https?:\\/\\//,'').replace(/\\/.*/,'').replace('www.','')}));"},
+      "id": "filter-no-social", "name": "Filter Without Social Data", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [650, 300]
+    },
+    {
+      "parameters": {"jsCode": "const lead = $input.first().json;\nconst name = encodeURIComponent(lead.businessName);\nconst urls = {\n  facebook: 'https://www.facebook.com/search/top?q=' + name,\n  instagram: 'https://www.instagram.com/' + lead.businessName.toLowerCase().replace(/\\s+/g,''),\n  linkedin: 'https://www.linkedin.com/company/' + lead.businessName.toLowerCase().replace(/\\s+/g,'-'),\n  youtube: 'https://www.youtube.com/results?search_query=' + name\n};\nreturn {...lead, socialUrls: urls, socialScore: 0};"},
+      "id": "generate-urls", "name": "Generate Social URLs", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [850, 300]
+    },
+    {
+      "parameters": {"url": "={{$json.socialUrls.facebook}}", "method": "GET", "options": {"timeout": 10000}, "continueOnFail": true},
+      "id": "check-facebook", "name": "Check Facebook", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [1050, 200]
+    },
+    {
+      "parameters": {"url": "={{$json.socialUrls.instagram}}", "method": "GET", "options": {"timeout": 10000}, "continueOnFail": true},
+      "id": "check-instagram", "name": "Check Instagram", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.1, "position": [1050, 400]
+    },
+    {
+      "parameters": {"jsCode": "const results = $input.all();\nconst socialScore = results.filter(r => r.json.statusCode === 200).length * 25;\nconst lead = $('Generate Social URLs').first().json;\nreturn {leadId: lead.leadId, businessName: lead.businessName, socialScore: socialScore, hasFacebook: results[0]?.json?.statusCode === 200, hasInstagram: results[1]?.json?.statusCode === 200, checkedAt: new Date().toISOString()};"},
+      "id": "calculate-score", "name": "Calculate Social Score", "type": "n8n-nodes-base.code", "typeVersion": 1, "position": [1250, 300]
+    },
+    {
+      "parameters": {"operation": "write", "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/social_profiles.csv", "options": {"delimiter": ",", "headerRow": true, "append": true}},
+      "id": "save-social", "name": "Save Social Profiles", "type": "n8n-nodes-base.spreadsheetFile", "typeVersion": 1, "position": [1450, 300]
+    }
+  ],
+  "connections": {
+    "Social Media Webhook": {"main": [[{"node": "Read leads.csv", "type": "main", "index": 0}]]},
+    "Read leads.csv": {"main": [[{"node": "Filter Without Social Data", "type": "main", "index": 0}]]},
+    "Filter Without Social Data": {"main": [[{"node": "Generate Social URLs", "type": "main", "index": 0}]]},
+    "Generate Social URLs": {"main": [[{"node": "Check Facebook", "type": "main", "index": 0}, {"node": "Check Instagram", "type": "main", "index": 0}]]},
+    "Check Facebook": {"main": [[{"node": "Calculate Social Score", "type": "main", "index": 0}]]},
+    "Check Instagram": {"main": [[{"node": "Calculate Social Score", "type": "main", "index": 0}]]},
+    "Calculate Social Score": {"main": [[{"node": "Save Social Profiles", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null, "tags": [{"name": "social"}], "pinData": {}, "versionId": "1.0.0"
+}

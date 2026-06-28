@@ -1,0 +1,38 @@
+{
+  "name": "01_Config",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "start-config",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-start",
+      "name": "Start Config",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "cfg-001"
+    },
+    {
+      "parameters": {
+        "jsCode": "return {\n  paths: {\n    home: process.env.HOME || '/home/ubuntu',\n    base: (process.env.HOME || '/home/ubuntu') + '/AI-Lead-Agent',\n    database: (process.env.HOME || '/home/ubuntu') + '/AI-Lead-Agent/database',\n    workflows: (process.env.HOME || '/home/ubuntu') + '/AI-Lead-Agent/workflows',\n    templates: (process.env.HOME || '/home/ubuntu') + '/AI-Lead-Agent/templates',\n    logs: (process.env.HOME || '/home/ubuntu') + '/AI-Lead-Agent/logs',\n    exports: (process.env.HOME || '/home/ubuntu') + '/AI-Lead-Agent/exports',\n    backups: (process.env.HOME || '/home/ubuntu') + '/AI-Lead-Agent/backups',\n    leadsCSV: (process.env.HOME || '/home/ubuntu') + '/AI-Lead-Agent/database/leads.csv',\n    sentLogCSV: (process.env.HOME || '/home/ubuntu') + '/AI-Lead-Agent/database/sent_log.csv',\n    errorLogCSV: (process.env.HOME || '/home/ubuntu') + '/AI-Lead-Agent/database/error_log.csv',\n    blacklistCSV: (process.env.HOME || '/home/ubuntu') + '/AI-Lead-Agent/database/blacklist.csv',\n    followupCSV: (process.env.HOME || '/home/ubuntu') + '/AI-Lead-Agent/database/followup.csv',\n    templatesCSV: (process.env.HOME || '/home/ubuntu') + '/AI-Lead-Agent/database/templates.csv'\n  },\n  company: { name: 'LandingPagePro', industry: 'Architecture Firms', country: 'USA' },\n  limits: { maxLeadsPerDay: 50, emailDelaySeconds: 120, maxFollowups: 3, followupIntervals: [3,7,14] },\n  blacklistDomains: ['gmail.com','yahoo.com','hotmail.com','outlook.com','aol.com'],\n  minWebsiteScore: 30,\n  status: 'initialized',\n  version: '1.0.0',\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "generate-config",
+      "name": "Generate All Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [450, 300]
+    }
+  ],
+  "connections": {
+    "Start Config": {
+      "main": [[{"node": "Generate All Config", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null,
+  "tags": [{"name": "config"}],
+  "pinData": {},
+  "versionId": "1.0.0"
+}

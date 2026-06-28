@@ -1,0 +1,163 @@
+{
+  "name": "03_Web_Scraper",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "scrape-start",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-scrape",
+      "name": "Scraper Start",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "scr-003"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cities = ['New York NY','Los Angeles CA','Chicago IL','Houston TX','Phoenix AZ','Dallas TX','Miami FL','Atlanta GA','Seattle WA','Denver CO'];\nconst queries = ['architecture firm','residential architect','commercial architect'];\nconst tasks = [];\nfor (const c of cities) { for (const q of queries) { tasks.push({city: c.split(' ')[0], state: c.split(' ')[1], query: q, location: c}); } }\nreturn tasks.slice(0, 3);"
+      },
+      "id": "make-tasks",
+      "name": "Make Search Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://maps.googleapis.com/maps/api/place/textsearch/json",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "query", "value": "={{$json.query}} in {{$json.location}}"},
+            {"name": "key", "value": "={{$env.GOOGLE_MAPS_API_KEY}}"},
+            {"name": "radius", "value": "50000"}
+          ]
+        },
+        "options": {"timeout": 15000},
+        "continueOnFail": true
+      },
+      "id": "google-maps",
+      "name": "Google Maps Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = ($input.first().json.results || []).map(p => ({\n  businessName: p.name || '',\n  address: p.formatted_address || p.vicinity || '',\n  phone: p.formatted_phone_number || '',\n  website: p.website || '',\n  rating: p.rating || 0,\n  totalRatings: p.user_ratings_total || 0,\n  placeId: p.place_id || '',\n  latitude: p.geometry?.location?.lat || '',\n  longitude: p.geometry?.location?.lng || '',\n  source: 'GoogleMaps'\n}));\nreturn results;"
+      },
+      "id": "parse-maps",
+      "name": "Parse Maps Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.yelp.com/v3/businesses/search",
+        "method": "GET",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "Authorization", "value": "Bearer {{$env.YELP_API_KEY}}"}]},
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "term", "value": "={{$json.query}}"},
+            {"name": "location", "value": "={{$json.location}}"},
+            {"name": "limit", "value": "10"}
+          ]
+        },
+        "options": {"timeout": 15000},
+        "continueOnFail": true
+      },
+      "id": "yelp-search",
+      "name": "Yelp Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 450]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = ($input.first().json.businesses || []).filter(b => !b.is_closed).map(b => ({\n  businessName: b.name || '',\n  address: b.location?.address1 || '',\n  city: b.location?.city || '',\n  state: b.location?.state || '',\n  zip: b.location?.zip_code || '',\n  phone: b.phone || b.display_phone || '',\n  website: b.url || '',\n  rating: b.rating || 0,\n  reviewCount: b.review_count || 0,\n  yelpId: b.id || '',\n  source: 'Yelp'\n}));\nreturn results;"
+      },
+      "id": "parse-yelp",
+      "name": "Parse Yelp Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [850, 450]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allBiz = [];\nfor (const item of $input.all()) {\n  if (Array.isArray(item.json)) { allBiz.push(...item.json); }\n  else if (item.json.businessName) { allBiz.push(item.json); }\n}\n\nconst unique = new Map();\nfor (const biz of allBiz) {\n  const key = (biz.website || biz.businessName + '|' + biz.phone).toLowerCase().trim();\n  if (!key || key === '|') continue;\n  if (!unique.has(key)) {\n    unique.set(key, { ...biz, id: 'lead-' + Date.now() + '-' + unique.size, collectedAt: new Date().toISOString() });\n  } else {\n    const old = unique.get(key);\n    if (biz.website && !old.website) old.website = biz.website;\n    if (biz.phone && !old.phone) old.phone = biz.phone;\n    old.source = (old.source || '') + ';' + biz.source;\n  }\n}\n\nreturn Array.from(unique.values());"
+      },
+      "id": "merge-all",
+      "name": "Merge & Deduplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1050, 325]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads.csv",
+        "options": {"delimiter": ",", "headerRow": true}
+      },
+      "id": "read-existing",
+      "name": "Read Existing Leads",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 1,
+      "position": [1250, 325]
+    },
+    {
+      "parameters": {
+        "jsCode": "const newBiz = $input.all().find(i => Array.isArray(i.json))?.json || [];\nconst existingData = $input.all().find(i => i.json.data)?.json?.data || [];\n\nconst existingWebsites = new Set(existingData.map(l => (l.website || '').toLowerCase().trim()).filter(Boolean));\n\nconst toAdd = [];\nfor (const biz of newBiz) {\n  const w = (biz.website || '').toLowerCase().trim();\n  if (w && existingWebsites.has(w)) continue;\n  if (w) existingWebsites.add(w);\n  toAdd.push(biz);\n}\n\nreturn { newLeads: toAdd, added: toAdd.length, skipped: newBiz.length - toAdd.length };"
+      },
+      "id": "filter-new",
+      "name": "Filter New Only",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1450, 325]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst leads = data.newLeads || [];\n\nif (leads.length === 0) {\n  return { written: 0, message: 'No new leads', success: true };\n}\n\nconst headers = ['id','businessName','website','email','phone','address','city','state','zip','source','websiteScore','emailValid','socialScore','leadScore','status','createdAt','updatedAt'];\n\nconst rows = leads.map(l => ({\n  id: l.id || 'lead-' + Date.now(),\n  businessName: l.businessName || '',\n  website: l.website || '',\n  email: l.email || '',\n  phone: l.phone || '',\n  address: l.address || '',\n  city: l.city || '',\n  state: l.state || '',\n  zip: l.zip || '',\n  source: l.source || '',\n  websiteScore: '0',\n  emailValid: 'pending',\n  socialScore: '0',\n  leadScore: '0',\n  status: 'new',\n  createdAt: l.collectedAt || new Date().toISOString(),\n  updatedAt: new Date().toISOString()\n}));\n\nreturn { rows, count: rows.length, headers };"
+      },
+      "id": "format-for-csv",
+      "name": "Format for CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1650, 325]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads.csv",
+        "options": {"delimiter": ",", "headerRow": true, "append": true}
+      },
+      "id": "save-csv",
+      "name": "Append to leads.csv",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 1,
+      "position": [1850, 325]
+    }
+  ],
+  "connections": {
+    "Scraper Start": {"main": [[{"node": "Make Search Tasks", "type": "main", "index": 0}]]},
+    "Make Search Tasks": {"main": [[{"node": "Google Maps Search", "type": "main", "index": 0}, {"node": "Yelp Search", "type": "main", "index": 0}]]},
+    "Google Maps Search": {"main": [[{"node": "Parse Maps Results", "type": "main", "index": 0}]]},
+    "Parse Maps Results": {"main": [[{"node": "Merge & Deduplicate", "type": "main", "index": 0}]]},
+    "Yelp Search": {"main": [[{"node": "Parse Yelp Results", "type": "main", "index": 0}]]},
+    "Parse Yelp Results": {"main": [[{"node": "Merge & Deduplicate", "type": "main", "index": 0}]]},
+    "Merge & Deduplicate": {"main": [[{"node": "Read Existing Leads", "type": "main", "index": 0}]]},
+    "Read Existing Leads": {"main": [[{"node": "Filter New Only", "type": "main", "index": 0}]]},
+    "Filter New Only": {"main": [[{"node": "Format for CSV", "type": "main", "index": 0}]]},
+    "Format for CSV": {"main": [[{"node": "Append to leads.csv", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null,
+  "tags": [{"name": "scraper"}],
+  "pinData": {},
+  "versionId": "1.0.0"
+}

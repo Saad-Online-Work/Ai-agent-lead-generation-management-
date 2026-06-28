@@ -1,0 +1,130 @@
+{
+  "name": "05_Email_Extractor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "extract-email",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-email-extract",
+      "name": "Email Extract Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "email-ext-005"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/leads.csv",
+        "options": {"delimiter": ",", "headerRow": true}
+      },
+      "id": "read-leads-csv",
+      "name": "Read leads.csv",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const leads = $input.first().json.data || [];\n\nconst needEmail = leads\n  .filter(l => l.website && (l.email === '' || l.email === 'pending' || !l.email))\n  .slice(0, 5)\n  .map(l => {\n    const domain = l.website\n      .replace(/^https?:\\/\\//, '')\n      .replace(/\\/.*$/, '')\n      .replace(/^www\\./, '');\n    \n    return {\n      leadId: l.id,\n      businessName: l.businessName,\n      website: l.website,\n      domain: domain,\n      existingEmail: l.email || ''\n    };\n  });\n\nreturn { leads: needEmail, count: needEmail.length };"
+      },
+      "id": "filter-need-email",
+      "name": "Filter Leads Needing Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.website}}",
+        "method": "GET",
+        "options": {"timeout": 15000, "response": {"response": {"responseFormat": "string"}}},
+        "continueOnFail": true
+      },
+      "id": "fetch-contact-page",
+      "name": "Fetch Website HTML",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.hunter.io/v2/domain-search",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "domain", "value": "={{$json.domain}}"},
+            {"name": "api_key", "value": "={{$env.HUNTER_API_KEY}}"}
+          ]
+        },
+        "options": {"timeout": 15000},
+        "continueOnFail": true
+      },
+      "id": "hunter-api",
+      "name": "Hunter.io API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 450]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allInputs = $input.all();\n\nconst htmlResp = allInputs.find(i => i.json.body || i.json.data);\nconst hunterResp = allInputs.find(i => i.json.data?.emails);\n\nconst html = String(htmlResp?.json?.body || htmlResp?.json?.data || '');\n\nconst scrapedEmails = [];\nconst emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g;\nconst found = html.match(emailRegex);\nif (found) {\n  const unique = [...new Set(found.map(e => e.toLowerCase()))];\n  for (const email of unique) {\n    if (!email.includes('example') && !email.includes('test') && !email.includes('sample')) {\n      scrapedEmails.push({ email, source: 'scraped', confidence: 40 });\n    }\n  }\n}\n\nconst commonPatterns = [];\nconst domain = $('Filter Leads Needing Email').first().json.domain;\nif (domain) {\n  const patterns = ['info', 'contact', 'hello', 'office', 'admin', 'studio', 'design', 'architecture', 'mail'];\n  for (const p of patterns) {\n    commonPatterns.push({ email: p + '@' + domain, source: 'pattern', confidence: 20 });\n  }\n}\n\nconst hunterEmails = [];\nif (hunterResp?.json?.data?.emails) {\n  for (const e of hunterResp.json.data.emails) {\n    hunterEmails.push({\n      email: e.value,\n      source: 'hunter',\n      confidence: e.confidence || 70,\n      type: e.type || 'unknown',\n      firstName: e.first_name || '',\n      lastName: e.last_name || '',\n      position: e.position || ''\n    });\n  }\n}\n\nconst allEmails = [...hunterEmails, ...scrapedEmails, ...commonPatterns];\n\nconst uniqueEmails = [];\nconst seen = new Set();\nfor (const e of allEmails) {\n  const key = e.email.toLowerCase();\n  if (!seen.has(key)) {\n    seen.add(key);\n    uniqueEmails.push(e);\n  }\n}\n\nconst sorted = uniqueEmails.sort((a, b) => b.confidence - a.confidence);\n\nreturn {\n  leadId: $('Filter Leads Needing Email').first().json.leadId,\n  businessName: $('Filter Leads Needing Email').first().json.businessName,\n  website: $('Filter Leads Needing Email').first().json.website,\n  domain: domain,\n  emailsFound: sorted,\n  bestEmail: sorted.length > 0 ? sorted[0].email : '',\n  totalFound: sorted.length,\n  sources: { hunter: hunterEmails.length, scraped: scrapedEmails.length, pattern: commonPatterns.length },\n  extractedAt: new Date().toISOString()\n};"
+      },
+      "id": "extract-emails",
+      "name": "Extract & Merge Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1050, 325]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\n\nconst row = {\n  leadId: result.leadId,\n  businessName: (result.businessName || '').replace(/,/g, ';'),\n  domain: result.domain,\n  bestEmail: result.bestEmail,\n  allEmails: result.emailsFound.map(e => e.email).join('; '),\n  emailSource: result.emailsFound.length > 0 ? result.emailsFound[0].source : 'none',\n  emailConfidence: String(result.emailsFound.length > 0 ? result.emailsFound[0].confidence : 0),\n  totalFound: String(result.totalFound),\n  extractedAt: result.extractedAt\n};\n\nreturn row;"
+      },
+      "id": "format-email-result",
+      "name": "Format Email Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1250, 325]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "filePath": "={{$env.HOME}}/AI-Lead-Agent/database/email_extracts.csv",
+        "options": {"delimiter": ",", "headerRow": true, "append": true}
+      },
+      "id": "save-email-results",
+      "name": "Save Email Results CSV",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 1,
+      "position": [1450, 325]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\n\nreturn {\n  extractionComplete: true,\n  leadId: result.leadId,\n  businessName: result.businessName,\n  bestEmail: result.bestEmail,\n  totalEmailsFound: result.totalFound,\n  needsValidation: result.bestEmail !== '',\n  nextStep: 'email-validation',\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "extraction-summary",
+      "name": "Extraction Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1650, 325]
+    }
+  ],
+  "connections": {
+    "Email Extract Webhook": {"main": [[{"node": "Read leads.csv", "type": "main", "index": 0}]]},
+    "Read leads.csv": {"main": [[{"node": "Filter Leads Needing Email", "type": "main", "index": 0}]]},
+    "Filter Leads Needing Email": {"main": [[{"node": "Fetch Website HTML", "type": "main", "index": 0}, {"node": "Hunter.io API", "type": "main", "index": 0}]]},
+    "Fetch Website HTML": {"main": [[{"node": "Extract & Merge Emails", "type": "main", "index": 0}]]},
+    "Hunter.io API": {"main": [[{"node": "Extract & Merge Emails", "type": "main", "index": 0}]]},
+    "Extract & Merge Emails": {"main": [[{"node": "Format Email Result", "type": "main", "index": 0}]]},
+    "Format Email Result": {"main": [[{"node": "Save Email Results CSV", "type": "main", "index": 0}]]},
+    "Save Email Results CSV": {"main": [[{"node": "Extraction Summary", "type": "main", "index": 0}]]}
+  },
+  "settings": {"saveExecutionProgress": true, "callerPolicy": "workflowsFromSameOwner"},
+  "staticData": null,
+  "tags": [{"name": "email"}, {"name": "extraction"}],
+  "pinData": {},
+  "versionId": "1.0.0"
+}
